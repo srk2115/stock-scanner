@@ -1,10 +1,11 @@
-import time
-import requests
+import os
+import pandas as pd
 from flask import Flask, render_template, request, jsonify
+from const import INDEX_SYMBOLS
 
 app = Flask(__name__)
 
-COOLING_DAYS = 20
+DATA_FOLDER = "data"
 
 def clean_and_format_symbols(raw_input_string):
     if not raw_input_string:
@@ -15,137 +16,131 @@ def clean_and_format_symbols(raw_input_string):
         token = token.strip().upper()
         if not token:
             continue
-        if not token.endswith('.NS') and '.' not in token:
-            token = f"{token}.NS"
         formatted_symbols.append(token)
     return formatted_symbols
+
+def find_csv_file(symbol):
+    base_symbol = symbol.replace('.NS', '')
+    possible_names = [
+        f"{base_symbol}.csv", f"{base_symbol}.NS.csv",
+        f"{symbol}.csv", f"{symbol}.NS.csv"
+    ]
+    if not os.path.exists(DATA_FOLDER):
+        return None
+    for name in possible_names:
+        for actual_file in os.listdir(DATA_FOLDER):
+            if actual_file.upper() == name.upper():
+                return os.path.join(DATA_FOLDER, actual_file)
+    return None
 
 @app.route('/')
 def index():
     return render_template('index1.html')
 
+@app.route('/get_indexes', methods=['GET'])
+def get_indexes():
+    return jsonify({'success': True, 'indexes': list(INDEX_SYMBOLS.keys())})
+
 @app.route('/scan', methods=['POST'])
 def scan_stocks():
     data = request.get_json() or {}
-    raw_input = data.get('symbols', '')
+    input_mode = data.get('mode', 'index')
+    require_ema_dip = data.get('require_ema_dip', True) # Read preference switch parameter
     
-    symbols = clean_and_format_symbols(raw_input)
+    if input_mode == 'index':
+        selected_index = data.get('index_name', '').upper()
+        symbols = INDEX_SYMBOLS.get(selected_index, [])
+        if not symbols:
+            return jsonify({'success': False, 'error': f'Index {selected_index} not found or empty.'})
+    else:
+        raw_input = data.get('symbols', '')
+        symbols = clean_and_format_symbols(raw_input)
+
     if not symbols:
         return jsonify({'success': False, 'error': 'No valid symbols provided.'})
         
     results = []
-    
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
-    })
-
-    current_epoch = int(time.time())
-
-    for ticker in symbols:
+    for symbol in symbols:
         is_match = False
         current_close = "-"
-        historical_ath = "-"
-        current_ema = "-"
+        val_sma50 = "-"
+        val_sma150 = "-"
+        val_ema220 = "-"
+        val_low52wk = "-"
+        val_ath = "-"
         status_str = "FAILED"
         
-        try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
-            params = {
-                'period1': 0,
-                'period2': current_epoch,
-                'interval': '1d',
-                'includeAdjustedClose': 'true'
-            }
-            
-            response = session.get(url, params=params, timeout=15)
-            
-            if response.status_code != 200:
-                status_str = f"HTTP ERROR {response.status_code}"
-            else:
-                json_data = response.json()
-                result_node = json_data.get('chart', {}).get('result', [])
+        csv_path = find_csv_file(symbol)
+        if not csv_path:
+            status_str = "FILE NOT FOUND"
+        else:
+            try:
+                df = pd.read_csv(csv_path)
+                df.columns = [str(col).strip().capitalize() for col in df.columns]
                 
-                if not result_node or result_node[0] is None:
-                    status_str = "INVALID TICKER"
+                if 'Close' not in df.columns or 'High' not in df.columns or 'Low' not in df.columns:
+                    status_str = "INVALID CSV FORMAT"
                 else:
-                    indicators = result_node[0].get('indicators', {}).get('quote', [{}])[0]
-                    adjclose_node = result_node[0].get('indicators', {}).get('adjclose', [{}])[0]
+                    df = df.dropna(subset=['Close']).reset_index(drop=True)
                     
-                    raw_closes = indicators.get('close', [])
-                    raw_highs = indicators.get('high', [])
-                    adj_closes = adjclose_node.get('adjclose', []) if adjclose_node else []
-                    
-                    if not adj_closes:
-                        adj_closes = raw_closes
-                    
-                    clean_closes = []
-                    clean_highs = []
-                    
-                    # --- REPLICATING THE EXCLUSIVELY EXACT YFINANCE MATHEMATICAL PARSING ---
-                    for i in range(len(raw_closes)):
-                        rc = raw_closes[i]
-                        rh = raw_highs[i]
-                        ac = adj_closes[i]
-                        
-                        # Only accept valid, non-zero data strings
-                        if rc is not None and rh is not None and ac is not None and rc > 0 and ac > 0:
-                            # 1. yfinance replicates 'Close' using the native Adjusted Close array directly
-                            yfinance_simulated_close = ac
-                            
-                            # 2. yfinance recalculates historical Highs by multiplying the raw High by the ratio of (Adj Close / Close)
-                            ratio_factor = ac / rc
-                            yfinance_simulated_high = rh * ratio_factor
-                            
-                            clean_closes.append(float(yfinance_simulated_close))
-                            clean_highs.append(float(yfinance_simulated_high))
-
-                    if len(clean_closes) < (220 + COOLING_DAYS):
+                    if len(df) < 252:
                         status_str = "INSUFFICIENT DATA"
                     else:
-                        # --- TECHNICAL CALCULATIONS MATRIX ---
-                        k = 2 / (220 + 1)
-                        ema_list = []
-                        current_ema_val = sum(clean_closes[:220]) / 220
-                        ema_list.append(current_ema_val)
+                        ema_220_series = df['Close'].ewm(span=220, adjust=False).mean()
+                        sma_150_series = df['Close'].rolling(window=150).mean()
+                        sma_50_series = df['Close'].rolling(window=50).mean()
                         
-                        for price in clean_closes[220:]:
-                            current_ema_val = (price * k) + (current_ema_val * (1 - k))
-                            ema_list.append(current_ema_val)
+                        low_52wk = float(df['Low'].iloc[-252:].min())
                         
-                        current_close = round(clean_closes[-1], 2)
-                        current_ema = round(ema_list[-1], 2)
+                        history_df = df.iloc[:-1]
+                        max_high_val = history_df['High'].max()
+                        ath_index = history_df['High'].idxmax()
                         
-                        # Isolate the historical window up to the cooling cutoff point using our mathematically perfect Highs
-                        historical_highs = clean_highs[:-COOLING_DAYS]
-                        historical_ath = round(max(historical_highs), 2)
+                        # Calculate dip only if required by user setup toggle
+                        if require_ema_dip:
+                            interim_df = history_df.iloc[ath_index + 1:]
+                            if len(interim_df) > 0:
+                                dipped_below_220_ema = (interim_df['Close'] < ema_220_series.loc[interim_df.index]).any()
+                            else:
+                                dipped_below_220_ema = False
+                        else:
+                            dipped_below_220_ema = True # Auto-pass condition if unchecked
                         
-                        recent_closes = clean_closes[-COOLING_DAYS:-1]
-                        was_below_ath = any(price < historical_ath for price in recent_closes)
+                        current_close = round(float(df['Close'].iloc[-1]), 2)
+                        val_ema220 = round(float(ema_220_series.iloc[-1]), 2)
+                        val_sma150 = round(float(sma_150_series.iloc[-1]), 2)
+                        val_sma50 = round(float(sma_50_series.iloc[-1]), 2)
+                        val_low52wk = round(low_52wk, 2)
+                        val_ath = round(float(max_high_val), 2)
                         
-                        is_breaking_above_old_ath = current_close > historical_ath
-                        is_above_ema = current_close > current_ema
+                        cond1 = val_sma150 > val_ema220
+                        cond2 = current_close > val_sma50
+                        cond3 = val_sma50 > val_sma150
+                        cond4 = current_close > (1.25 * val_low52wk)
+                        cond5 = current_close > max_high_val
+                        cond6 = bool(dipped_below_220_ema)
                         
-                        if is_breaking_above_old_ath and is_above_ema and was_below_ath:
+                        if cond1 and cond2 and cond3 and cond4 and cond5 and cond6:
                             status_str = "MATCH"
                             is_match = True
                         else:
                             status_str = "NO MATCH"
                             
-        except Exception as e:
-            status_str = f"ERR: {str(e)[:12]}"
-            
+            except Exception as e:
+                status_str = "ERR: READ ERROR"
+                print(f"[ERROR] Failed parsing data for {symbol}: {str(e)}")
+                
         results.append({
-            'ticker': ticker, 
-            'close': current_close, 
-            'ath': historical_ath, 
-            'ema': current_ema, 
-            'status': status_str, 
+            'ticker': symbol,
+            'close': current_close,
+            'sma_50': val_sma50,
+            'sma_150': val_sma150,
+            'ema_220': val_ema220,
+            'low_52wk': val_low52wk,
+            'historical_ath': val_ath,
+            'status': status_str,
             'is_match': is_match
         })
-        
-        time.sleep(0.05)
 
     return jsonify({'success': True, 'results': results})
 
