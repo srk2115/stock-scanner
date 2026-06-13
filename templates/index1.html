@@ -125,7 +125,7 @@
         .config-checkbox-container {
             display: flex;
             align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 25px;
             font-weight: 600;
             font-size: 0.95rem;
             color: var(--text-muted);
@@ -198,7 +198,7 @@
 <body>
 
 <div class="container">
-    <h2>Trend Continuity & Breakout Scanner</h2>
+    <h2>Trend Continuity & Breakout Scanner Panel</h2>
     
     <div class="form-group">
         <label>Select Target Input Method:</label>
@@ -207,7 +207,7 @@
                 <input type="radio" name="inputMode" value="index" checked onchange="toggleInputMode()"> Preset Market Indexes
             </label>
             <label class="radio-option">
-                <input type="radio" name="inputMode" value="manual" onchange="toggleInputMode()"> Enter Symbols
+                <input type="radio" name="inputMode" value="manual" onchange="toggleInputMode()"> Enter Custom Tickers
             </label>
         </div>
     </div>
@@ -219,18 +219,27 @@
     </div>
 
     <div id="manualPanel" class="form-group hidden-panel">
-        <label for="symbolsTextarea">Enter Ticker Symbols (separated by space, comma, or linebreaks):</label>
+        <label for="symbolsTextarea">Enter Ticker Symbols (separated by spaces, commas, or linebreaks):</label>
         <textarea id="symbolsTextarea" placeholder="e.g., MAHABANK RELIANCE TCS INFOSYS"></textarea>
     </div>
 
     <div class="config-checkbox-container">
         <label style="display: flex; align-items: center; cursor: pointer; margin: 0;">
-            <input type="checkbox" id="requireEmaDipCheckbox" checked> Require 220 EMA Dip after historical ATH
+            <input type="checkbox" id="requireEmaDipCheckbox" checked> Require 220 EMA Dip adjustment after historical ATH
         </label>
     </div>
 
     <button id="scanBtn" onclick="runStockScan()">Execute Strategy Scan</button>
-    <div id="loadingText">Processing technical indicator matrix data... Please wait...</div>
+    <div id="loadingText">Processing technical indicator matrix data concurrently... Please wait...</div>
+
+    <div style="margin-top: 35px; padding-top: 25px; border-top: 2px solid #e2e8f0;">
+        <label style="font-weight: bold; color: #1a365d; margin-bottom: 8px; display: block;">Historical Strategy Backtest Analysis Ledger:</label>
+        <div style="display: flex; gap: 10px; max-width: 500px; align-items: center;">
+            <input type="text" id="backtestSymbolInput" placeholder="e.g., MAHABANK" value="MAHABANK" style="width: 130px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; font-size: 15px; text-transform: uppercase;">
+            <button type="button" onclick="launchWebBacktest()" style="width: auto; padding: 11px 20px; background-color: #4a5568;">Analyze History</button>
+        </div>
+        <small style="color: #718096; display: block; margin-top: 6px;">Applies whatever state your "Require 220 EMA Dip adjustment" checkbox above is currently set to.</small>
+    </div>
 
     <div class="filter-container" id="filterWrapper" style="display: none;">
         <label style="display: flex; align-items: center; cursor: pointer; margin: 0;">
@@ -280,7 +289,7 @@
                     });
                 }
             })
-            .catch(err => console.error("Error updating database references:", err));
+            .catch(err => console.error("Error connecting index dictionary mapping:", err));
     });
 
     function toggleInputMode() {
@@ -301,7 +310,7 @@
         if (mode === 'manual') {
             const symbolsString = document.getElementById('symbolsTextarea').value;
             if (!symbolsString.trim()) {
-                alert("Please enter at least one stock symbol to process.");
+                alert("Please enter at least one target stock ticker.");
                 return;
             }
             payload.symbols = symbolsString;
@@ -338,13 +347,13 @@
                 tableWrapper.style.display = 'block';
                 applyRowFilters();
             } else {
-                alert("Scan Execution Failure: " + data.error);
+                alert("Scan Execution Terminated: " + data.error);
             }
         })
         .catch(err => {
             scanBtn.disabled = false;
             loadingText.style.display = 'none';
-            alert("Network Communication Error: " + err);
+            alert("Network Pipeline Error occurred: " + err);
         });
     }
 
@@ -360,7 +369,7 @@
             }
             
             const row = document.createElement('tr');
-            const cleanStatusClass = stock.status.replace(/ /g, "-");
+            const cleanStatusClass = stock.status.replace(/ /g, "-").replace(/:/g, "");
             
             row.innerHTML = `
                 <td><strong>${stock.ticker}</strong></td>
@@ -374,6 +383,20 @@
             `;
             resultsBody.appendChild(row);
         });
+    }
+
+    function launchWebBacktest() {
+        const symbolInput = document.getElementById('backtestSymbolInput').value.trim();
+        if (!symbolInput) {
+            alert("Please provide a valid ticker symbol to launch historical backtesting.");
+            return;
+        }
+        
+        // Read the current state of the 220 EMA check box from your core scanner parameters panel!
+        const requireEmaDip = document.getElementById('requireEmaDipCheckbox').checked;
+        
+        // Pass both tracking keys into the dynamic routing engine link
+        window.location.href = `/backtest?symbol=${encodeURIComponent(symbolInput)}&require_ema_dip=${requireEmaDip}`;
     }
 </script>
 
