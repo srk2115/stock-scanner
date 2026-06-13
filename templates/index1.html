@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Breakout Web Scanner Engine</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .match-row { background-color: #d1e7dd !important; color: #0f5132; font-weight: bold; }
+        .failed-row { color: #6c757d; }
+        .progress-container { margin-bottom: 25px; }
+        .table-responsive { max-height: 500px; overflow-y: auto; }
+        .sticky-top { position: sticky; top: 0; z-index: 10; }
+    </style>
+</head>
+<body class="bg-light">
+
+<div class="container my-5">
+    <div class="card shadow-sm p-4 bg-white rounded">
+        <h2 class="mb-3 text-primary">Cloud-Optimized Batch Stock Scanner</h2>
+        
+        <div class="mb-4">
+            <label for="symbolInput" class="form-label fw-bold">Enter Stock Symbols:</label>
+            <textarea id="symbolInput" class="form-control" rows="4" placeholder="Example: HDFCBANK, MAHABANK, SBIN, RELIANCE"></textarea>
+            <div class="form-text text-muted">Separate symbols by spaces, commas, semicolons, or line breaks. The engine formats everything and appends .NS automatically.</div>
+        </div>
+
+        <div class="progress-container">
+            <button id="startBtn" class="btn btn-primary btn-lg mb-3">Execute Live Scan Pipeline</button>
+            <div id="statusMessage" class="fw-semibold text-secondary mb-2">Input your symbols list and tap execute.</div>
+            <div class="progress" style="height: 25px; margin-bottom: 10px;">
+                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%;">0%</div>
+            </div>
+        </div>
+
+        <ul class="nav nav-tabs mb-3" id="scannerTabs" role="tablist">
+            <li class="nav-item">
+                <button class="nav-link active fw-bold" id="all-tab" data-bs-toggle="tab" data-bs-target="#all-pane" type="button" role="tab">All Input Symbols (<span id="allCount">0</span>)</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link text-success fw-bold" id="matches-tab" data-bs-toggle="tab" data-bs-target="#matches-pane" type="button" role="tab">💥 Confirmed Breakouts (<span id="matchCount">0</span>)</button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="scannerTabsContent">
+            <div class="tab-pane fade show active" id="all-pane" role="tabpanel">
+                <div class="table-responsive">
+                    <table class="table table-bordered align-middle">
+                        <thead class="table-dark sticky-top">
+                            <tr>
+                                <th>#</th>
+                                <th>Ticker</th>
+                                <th>Latest Close</th>
+                                <th>Historical ATH</th>
+                                <th>220-Day EMA</th>
+                                <th>Status Result</th>
+                            </tr>
+                        </thead>
+                        <tbody id="allSymbolsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="matches-pane" role="tabpanel">
+                <div class="table-responsive">
+                    <table class="table table-bordered align-middle">
+                        <thead class="table-success sticky-top">
+                            <tr>
+                                <th>Ticker Identifier</th>
+                                <th>Latest Close</th>
+                                <th>Historical ATH</th>
+                                <th>220-Day EMA Matrix</th>
+                            </tr>
+                        </thead>
+                        <tbody id="matchSymbolsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    document.getElementById('startBtn').addEventListener('click', async function() {
+        const rawInputText = document.getElementById('symbolInput').value.trim();
+        
+        if(!rawInputText) {
+            alert("Please input at least one symbol target token before starting execution.");
+            return;
+        }
+
+        const allBody = document.getElementById('allSymbolsBody');
+        const matchBody = document.getElementById('matchSymbolsBody');
+        const statusMessage = document.getElementById('statusMessage');
+        const progressBar = document.getElementById('progressBar');
+        
+        // Reset view states from prior analysis pipelines
+        allBody.innerHTML = '';
+        matchBody.innerHTML = '';
+        document.getElementById('allCount').innerText = '0';
+        document.getElementById('matchCount').innerText = '0';
+        progressBar.style.width = '0%';
+        progressBar.innerText = '0%';
+        
+        this.disabled = true;
+
+        // Clean input formatting rules via standard Regex matching arrays
+        const cleanedText = rawInputText.replace(/,/g, ' ').replace(/;/g, ' ').replace(/\n/g, ' ');
+        const allTokens = cleanedText.split(/\s+/).map(t => t.trim().toUpperCase()).filter(t => t.length > 0);
+        
+        if (allTokens.length === 0) {
+            alert("No valid symbols found in your text field input.");
+            this.disabled = false;
+            return;
+        }
+
+        // Configuration Parameter: Process in tight groups to prevent proxy timeouts
+        const chunkSize = 5; 
+        const chunks = [];
+        for (let i = 0; i < allTokens.length; i += chunkSize) {
+            chunks.push(allTokens.slice(i, i + chunkSize));
+        }
+
+        statusMessage.className = "fw-semibold text-primary mb-2";
+        statusMessage.innerText = `Found ${allTokens.length} tickers. Processing in ${chunks.length} background batches...`;
+
+        let globalProcessedIndex = 0;
+        let matchCounter = 0;
+
+        // Sequential iteration execution block across chunk payloads
+        for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
+            const currentChunk = chunks[cIdx];
+            statusMessage.innerText = `Scanning batch ${cIdx + 1} of ${chunks.length}...`;
+
+            try {
+                // Post targeted array payload block down to application endpoint
+                const response = await fetch('/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbols: currentChunk.join(' ') })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.results) {
+                    data.results.forEach((row) => {
+                        globalProcessedIndex++;
+                        
+                        let rowClass = row.is_match ? 'match-row' : 'failed-row';
+                        let statusBadge = row.is_match ? '<span class="badge bg-success">MATCH</span>' : `<span class="badge bg-secondary">${row.status}</span>`;
+
+                        const rowHTML = `<tr class="${rowClass}">
+                            <td>${globalProcessedIndex}</td>
+                            <td>${row.ticker}</td>
+                            <td>${row.close}</td>
+                            <td>${row.ath}</td>
+                            <td>${row.ema}</td>
+                            <td>${statusBadge}</td>
+                        </tr>`;
+                        allBody.insertAdjacentHTML('beforeend', rowHTML);
+
+                        if (row.is_match) {
+                            matchCounter++;
+                            const matchHTML = `<tr>
+                                <td class="fw-bold text-success">${row.ticker}</td>
+                                <td>${row.close}</td>
+                                <td>${row.ath}</td>
+                                <td>${row.ema}</td>
+                            </tr>`;
+                            matchBody.insertAdjacentHTML('beforeend', matchHTML);
+                        }
+                    });
+
+                    // Update global UI execution summary indicators mid-flight
+                    document.getElementById('allCount').innerText = globalProcessedIndex;
+                    document.getElementById('matchCount').innerText = matchCounter;
+
+                    // Compute incremental width properties across progress bar components
+                    const pct = Math.round((globalProcessedIndex / allTokens.length) * 100);
+                    progressBar.style.width = pct + '%';
+                    progressBar.innerText = `${pct}% (${globalProcessedIndex}/${allTokens.length})`;
+                } else {
+                    // Handle case where backend returns success: false structure
+                    currentChunk.forEach((ticker) => {
+                        globalProcessedIndex++;
+                        const backendErrHTML = `<tr class="failed-row">
+                            <td>${globalProcessedIndex}</td><td>${ticker}</td><td>-</td><td>-</td><td>-</td><td><span class="badge bg-warning">SERVER RETRY</span></td>
+                        </tr>`;
+                        allBody.insertAdjacentHTML('beforeend', backendErrHTML);
+                    });
+                }
+            } catch (err) {
+                console.error("Batch transmission pipe drop encountered:", err);
+                // Fallback loop if networking drop or server timeout triggers locally
+                currentChunk.forEach((ticker) => {
+                    globalProcessedIndex++;
+                    const errHTML = `<tr class="failed-row">
+                        <td>${globalProcessedIndex}</td><td>${ticker}</td><td>-</td><td>-</td><td>-</td><td><span class="badge bg-danger">TIMEOUT / BLOCK</span></td>
+                    </tr>`;
+                    allBody.insertAdjacentHTML('beforeend', errHTML);
+                });
+            }
+        }
+
+        // Finalize state properties upon completion
+        this.disabled = false;
+        statusMessage.className = "fw-semibold text-success mb-2";
+        statusMessage.innerText = "All dynamic ticker arrays successfully compiled and analyzed!";
+    });
+</script>
+</body>
+</html>
