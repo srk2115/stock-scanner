@@ -3,212 +3,379 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dynamic Breakout Web Scanner Engine</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Trend Continuity & Breakout Scanner</title>
     <style>
-        .match-row { background-color: #d1e7dd !important; color: #0f5132; font-weight: bold; }
-        .failed-row { color: #6c757d; }
-        .progress-container { margin-bottom: 25px; }
-        .table-responsive { max-height: 500px; overflow-y: auto; }
-        .sticky-top { position: sticky; top: 0; z-index: 10; }
+        :root {
+            --primary: #3182ce;
+            --primary-hover: #2b6cb0;
+            --dark-bg: #2d3748;
+            --light-bg: #f4f6f9;
+            --panel-bg: #ffffff;
+            --toggle-bg: #edf2f7;
+            --border: #cbd5e1;
+            --text: #333333;
+            --text-muted: #2d3748;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--light-bg);
+            color: var(--text);
+            margin: 0;
+            padding: 12px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .container {
+            width: 100%;
+            max-width: 1100px;
+            margin: 0 auto;
+            background: var(--panel-bg);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            box-sizing: border-box;
+        }
+        h2 {
+            margin-top: 0;
+            font-size: 1.5rem;
+            color: #1a365d;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 10px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+        select, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 16px;
+            box-sizing: border-box;
+            background-color: #fff;
+            font-family: inherit;
+        }
+        textarea {
+            height: 120px;
+            resize: vertical;
+        }
+        .radio-toggle {
+            display: flex;
+            flex-direction: row;
+            gap: 12px;
+            margin-bottom: 15px;
+            background: var(--toggle-bg);
+            padding: 6px;
+            border-radius: 8px;
+        }
+        .radio-option {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 0.9rem;
+            padding: 10px;
+            background: transparent;
+            border-radius: 6px;
+            transition: background 0.2s;
+            text-align: center;
+        }
+        .radio-option:has(input:checked) {
+            background: var(--panel-bg);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+            font-weight: 600;
+        }
+        .hidden-panel { display: none; }
+        .active-panel { display: block; }
+        
+        button {
+            width: 100%;
+            background-color: var(--primary);
+            color: white;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background 0.2s;
+            box-shadow: 0 2px 4px rgba(49, 130, 206, 0.2);
+        }
+        button:hover { background-color: var(--primary-hover); }
+        button:disabled { background-color: #a0aec0; cursor: not-allowed; }
+        
+        #loadingText {
+            margin-top: 15px;
+            font-weight: bold;
+            color: var(--primary);
+            text-align: center;
+            font-size: 0.95rem;
+            display: none;
+        }
+
+        .config-checkbox-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: var(--text-muted);
+        }
+        .config-checkbox-container input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+
+        .filter-container {
+            margin-top: 25px;
+            display: flex;
+            align-items: center;
+            background: var(--toggle-bg);
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: var(--text-muted);
+        }
+        .filter-container input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+        .table-responsive-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            margin-top: 15px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            -webkit-overflow-scrolling: touch;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 850px;
+        }
+        th, td {
+            padding: 12px 14px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 0.9rem;
+        }
+        th {
+            background-color: var(--dark-bg);
+            color: white;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        tr:nth-child(even) { background-color: #f8fafc; }
+        .status-MATCH { color: #38a169; font-weight: bold; }
+        .status-NO-MATCH { color: #e53e3e; }
+        .status-FILE-NOT-FOUND { color: #dda15e; font-style: italic; }
+
+        @media (min-width: 768px) {
+            body { padding: 30px; }
+            .container { padding: 30px; }
+            h2 { font-size: 1.8rem; }
+            button { width: auto; }
+            .radio-toggle { display: inline-flex; width: auto; }
+            .radio-option { padding: 8px 20px; flex: none; }
+            th, td { padding: 14px 18px; font-size: 0.95rem; }
+        }
     </style>
 </head>
-<body class="bg-light">
+<body>
 
-<div class="container my-5">
-    <div class="card shadow-sm p-4 bg-white rounded">
-        <h2 class="mb-3 text-primary">Cloud-Optimized Batch Stock Scanner</h2>
-        
-        <div class="mb-4">
-            <label for="symbolInput" class="form-label fw-bold">Enter Stock Symbols:</label>
-            <textarea id="symbolInput" class="form-control" rows="4" placeholder="Example: HDFCBANK, MAHABANK, SBIN, RELIANCE"></textarea>
-            <div class="form-text text-muted">Separate symbols by spaces, commas, semicolons, or line breaks. The engine formats everything and appends .NS automatically.</div>
+<div class="container">
+    <h2>Trend Continuity & Breakout Scanner</h2>
+    
+    <div class="form-group">
+        <label>Select Target Input Method:</label>
+        <div class="radio-toggle">
+            <label class="radio-option">
+                <input type="radio" name="inputMode" value="index" checked onchange="toggleInputMode()"> Preset Market Indexes
+            </label>
+            <label class="radio-option">
+                <input type="radio" name="inputMode" value="manual" onchange="toggleInputMode()"> Enter Symbols
+            </label>
         </div>
+    </div>
 
-        <div class="progress-container">
-            <button id="startBtn" class="btn btn-primary btn-lg mb-3">Execute Live Scan Pipeline</button>
-            <div id="statusMessage" class="fw-semibold text-secondary mb-2">Input your symbols list and tap execute.</div>
-            <div class="progress" style="height: 25px; margin-bottom: 10px;">
-                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%;">0%</div>
-            </div>
-        </div>
+    <div id="indexPanel" class="form-group active-panel">
+        <label for="indexSelect">Select Target Market Index Universe Group:</label>
+        <select id="indexSelect">
+            </select>
+    </div>
 
-        <ul class="nav nav-tabs mb-3" id="scannerTabs" role="tablist">
-            <li class="nav-item">
-                <button class="nav-link active fw-bold" id="all-tab" data-bs-toggle="tab" data-bs-target="#all-pane" type="button" role="tab">All Input Symbols (<span id="allCount">0</span>)</button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link text-success fw-bold" id="matches-tab" data-bs-toggle="tab" data-bs-target="#matches-pane" type="button" role="tab">💥 Confirmed Breakouts (<span id="matchCount">0</span>)</button>
-            </li>
-        </ul>
+    <div id="manualPanel" class="form-group hidden-panel">
+        <label for="symbolsTextarea">Enter Ticker Symbols (separated by space, comma, or linebreaks):</label>
+        <textarea id="symbolsTextarea" placeholder="e.g., MAHABANK RELIANCE TCS INFOSYS"></textarea>
+    </div>
 
-        <div class="tab-content" id="scannerTabsContent">
-            <div class="tab-pane fade show active" id="all-pane" role="tabpanel">
-                <div class="table-responsive">
-                    <table class="table table-bordered align-middle">
-                        <thead class="table-dark sticky-top">
-                            <tr>
-                                <th>#</th>
-                                <th>Ticker</th>
-                                <th>Latest Close</th>
-                                <th>Historical ATH</th>
-                                <th>220-Day EMA</th>
-                                <th>Status Result</th>
-                            </tr>
-                        </thead>
-                        <tbody id="allSymbolsBody"></tbody>
-                    </table>
-                </div>
-            </div>
+    <div class="config-checkbox-container">
+        <label style="display: flex; align-items: center; cursor: pointer; margin: 0;">
+            <input type="checkbox" id="requireEmaDipCheckbox" checked> Require 220 EMA Dip after historical ATH
+        </label>
+    </div>
 
-            <div class="tab-pane fade" id="matches-pane" role="tabpanel">
-                <div class="table-responsive">
-                    <table class="table table-bordered align-middle">
-                        <thead class="table-success sticky-top">
-                            <tr>
-                                <th>Ticker Identifier</th>
-                                <th>Latest Close</th>
-                                <th>Historical ATH</th>
-                                <th>220-Day EMA Matrix</th>
-                            </tr>
-                        </thead>
-                        <tbody id="matchSymbolsBody"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
+    <button id="scanBtn" onclick="runStockScan()">Execute Strategy Scan</button>
+    <div id="loadingText">Processing technical indicator matrix data... Please wait...</div>
+
+    <div class="filter-container" id="filterWrapper" style="display: none;">
+        <label style="display: flex; align-items: center; cursor: pointer; margin: 0;">
+            <input type="checkbox" id="matchOnlyCheckbox" onchange="applyRowFilters()"> Show Matched Results Only
+        </label>
+    </div>
+
+    <div class="table-responsive-wrapper" id="tableWrapper" style="display: none;">
+        <table id="resultsTable">
+            <thead>
+                <tr>
+                    <th>Ticker</th>
+                    <th>Status Result</th>
+                    <th>Latest Close</th>
+                    <th>Historical ATH</th>
+                    <th>50-Day SMA</th>
+                    <th>150-Day SMA</th>
+                    <th>220-Day EMA</th>
+                    <th>52-Week Low</th>
+                </tr>
+            </thead>
+            <tbody id="resultsBody">
+                </tbody>
+        </table>
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
 <script>
-    document.getElementById('startBtn').addEventListener('click', async function() {
-        const rawInputText = document.getElementById('symbolInput').value.trim();
-        
-        if(!rawInputText) {
-            alert("Please input at least one symbol target token before starting execution.");
-            return;
-        }
+    let currentScanResults = [];
 
-        const allBody = document.getElementById('allSymbolsBody');
-        const matchBody = document.getElementById('matchSymbolsBody');
-        const statusMessage = document.getElementById('statusMessage');
-        const progressBar = document.getElementById('progressBar');
-        
-        // Reset view states from prior analysis pipelines
-        allBody.innerHTML = '';
-        matchBody.innerHTML = '';
-        document.getElementById('allCount').innerText = '0';
-        document.getElementById('matchCount').innerText = '0';
-        progressBar.style.width = '0%';
-        progressBar.innerText = '0%';
-        
-        this.disabled = true;
-
-        // Clean input formatting rules via standard Regex matching arrays
-        const cleanedText = rawInputText.replace(/,/g, ' ').replace(/;/g, ' ').replace(/\n/g, ' ');
-        const allTokens = cleanedText.split(/\s+/).map(t => t.trim().toUpperCase()).filter(t => t.length > 0);
-        
-        if (allTokens.length === 0) {
-            alert("No valid symbols found in your text field input.");
-            this.disabled = false;
-            return;
-        }
-
-        // Configuration Parameter: Process in tight groups to prevent proxy timeouts
-        const chunkSize = 5; 
-        const chunks = [];
-        for (let i = 0; i < allTokens.length; i += chunkSize) {
-            chunks.push(allTokens.slice(i, i + chunkSize));
-        }
-
-        statusMessage.className = "fw-semibold text-primary mb-2";
-        statusMessage.innerText = `Found ${allTokens.length} tickers. Processing in ${chunks.length} background batches...`;
-
-        let globalProcessedIndex = 0;
-        let matchCounter = 0;
-
-        // Sequential iteration execution block across chunk payloads
-        for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
-            const currentChunk = chunks[cIdx];
-            statusMessage.innerText = `Scanning batch ${cIdx + 1} of ${chunks.length}...`;
-
-            try {
-                // Post targeted array payload block down to application endpoint
-                const response = await fetch('/scan', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ symbols: currentChunk.join(' ') })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success && data.results) {
-                    data.results.forEach((row) => {
-                        globalProcessedIndex++;
-                        
-                        let rowClass = row.is_match ? 'match-row' : 'failed-row';
-                        let statusBadge = row.is_match ? '<span class="badge bg-success">MATCH</span>' : `<span class="badge bg-secondary">${row.status}</span>`;
-
-                        const rowHTML = `<tr class="${rowClass}">
-                            <td>${globalProcessedIndex}</td>
-                            <td>${row.ticker}</td>
-                            <td>${row.close}</td>
-                            <td>${row.ath}</td>
-                            <td>${row.ema}</td>
-                            <td>${statusBadge}</td>
-                        </tr>`;
-                        allBody.insertAdjacentHTML('beforeend', rowHTML);
-
-                        if (row.is_match) {
-                            matchCounter++;
-                            const matchHTML = `<tr>
-                                <td class="fw-bold text-success">${row.ticker}</td>
-                                <td>${row.close}</td>
-                                <td>${row.ath}</td>
-                                <td>${row.ema}</td>
-                            </tr>`;
-                            matchBody.insertAdjacentHTML('beforeend', matchHTML);
+    document.addEventListener("DOMContentLoaded", function() {
+        const indexSelect = document.getElementById('indexSelect');
+        fetch('/get_indexes')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.indexes) {
+                    indexSelect.innerHTML = '';
+                    data.indexes.forEach(indexKey => {
+                        const option = document.createElement('option');
+                        option.value = indexKey;
+                        if(indexKey.startsWith("NIFTY") && indexKey !== "NIFTY500" && indexKey !== "NIFTY100") {
+                            option.textContent = indexKey.replace("NIFTY", "NIFTY ");
+                        } else {
+                            option.textContent = indexKey; 
                         }
-                    });
-
-                    // Update global UI execution summary indicators mid-flight
-                    document.getElementById('allCount').innerText = globalProcessedIndex;
-                    document.getElementById('matchCount').innerText = matchCounter;
-
-                    // Compute incremental width properties across progress bar components
-                    const pct = Math.round((globalProcessedIndex / allTokens.length) * 100);
-                    progressBar.style.width = pct + '%';
-                    progressBar.innerText = `${pct}% (${globalProcessedIndex}/${allTokens.length})`;
-                } else {
-                    // Handle case where backend returns success: false structure
-                    currentChunk.forEach((ticker) => {
-                        globalProcessedIndex++;
-                        const backendErrHTML = `<tr class="failed-row">
-                            <td>${globalProcessedIndex}</td><td>${ticker}</td><td>-</td><td>-</td><td>-</td><td><span class="badge bg-warning">SERVER RETRY</span></td>
-                        </tr>`;
-                        allBody.insertAdjacentHTML('beforeend', backendErrHTML);
+                        indexSelect.appendChild(option);
                     });
                 }
-            } catch (err) {
-                console.error("Batch transmission pipe drop encountered:", err);
-                // Fallback loop if networking drop or server timeout triggers locally
-                currentChunk.forEach((ticker) => {
-                    globalProcessedIndex++;
-                    const errHTML = `<tr class="failed-row">
-                        <td>${globalProcessedIndex}</td><td>${ticker}</td><td>-</td><td>-</td><td>-</td><td><span class="badge bg-danger">TIMEOUT / BLOCK</span></td>
-                    </tr>`;
-                    allBody.insertAdjacentHTML('beforeend', errHTML);
-                });
+            })
+            .catch(err => console.error("Error updating database references:", err));
+    });
+
+    function toggleInputMode() {
+        const mode = document.querySelector('input[name="inputMode"]:checked').value;
+        document.getElementById('manualPanel').className = mode === 'manual' ? 'form-group active-panel' : 'form-group hidden-panel';
+        document.getElementById('indexPanel').className = mode === 'index' ? 'form-group active-panel' : 'form-group hidden-panel';
+    }
+
+    function runStockScan() {
+        const mode = document.querySelector('input[name="inputMode"]:checked').value;
+        const requireEmaDip = document.getElementById('requireEmaDipCheckbox').checked;
+        
+        let payload = { 
+            mode: mode,
+            require_ema_dip: requireEmaDip 
+        };
+
+        if (mode === 'manual') {
+            const symbolsString = document.getElementById('symbolsTextarea').value;
+            if (!symbolsString.trim()) {
+                alert("Please enter at least one stock symbol to process.");
+                return;
             }
+            payload.symbols = symbolsString;
+        } else {
+            payload.index_name = document.getElementById('indexSelect').value;
         }
 
-        // Finalize state properties upon completion
-        this.disabled = false;
-        statusMessage.className = "fw-semibold text-success mb-2";
-        statusMessage.innerText = "All dynamic ticker arrays successfully compiled and analyzed!";
-    });
+        const scanBtn = document.getElementById('scanBtn');
+        const loadingText = document.getElementById('loadingText');
+        const tableWrapper = document.getElementById('tableWrapper');
+        const filterWrapper = document.getElementById('filterWrapper');
+        const resultsBody = document.getElementById('resultsBody');
+
+        scanBtn.disabled = true;
+        loadingText.style.display = 'block';
+        tableWrapper.style.display = 'none';
+        filterWrapper.style.display = 'none';
+        resultsBody.innerHTML = '';
+        currentScanResults = [];
+
+        fetch('/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(response => response.json())
+        .then(data => {
+            scanBtn.disabled = false;
+            loadingText.style.display = 'none';
+
+            if (data.success) {
+                currentScanResults = data.results;
+                filterWrapper.style.display = 'flex';
+                tableWrapper.style.display = 'block';
+                applyRowFilters();
+            } else {
+                alert("Scan Execution Failure: " + data.error);
+            }
+        })
+        .catch(err => {
+            scanBtn.disabled = false;
+            loadingText.style.display = 'none';
+            alert("Network Communication Error: " + err);
+        });
+    }
+
+    function applyRowFilters() {
+        const resultsBody = document.getElementById('resultsBody');
+        const showMatchesOnly = document.getElementById('matchOnlyCheckbox').checked;
+        
+        resultsBody.innerHTML = '';
+        
+        currentScanResults.forEach(stock => {
+            if (showMatchesOnly && !stock.is_match) {
+                return;
+            }
+            
+            const row = document.createElement('tr');
+            const cleanStatusClass = stock.status.replace(/ /g, "-");
+            
+            row.innerHTML = `
+                <td><strong>${stock.ticker}</strong></td>
+                <td class="status-${cleanStatusClass}">${stock.status}</td>
+                <td>${stock.close}</td>
+                <td>${stock.historical_ath}</td>
+                <td>${stock.sma_50}</td>
+                <td>${stock.sma_150}</td>
+                <td>${stock.ema_220}</td>
+                <td>${stock.low_52wk}</td>
+            `;
+            resultsBody.appendChild(row);
+        });
+    }
 </script>
+
 </body>
 </html>
