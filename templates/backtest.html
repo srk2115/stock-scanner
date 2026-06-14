@@ -125,7 +125,8 @@
         </div>
 
         <input type="hidden" id="activeTicker" value="{{ symbol }}">
-        <input type="hidden" id="activeEmaDip" value="{{ require_ema_dip }}">
+        <input type="hidden" id="activeEmaDip" {{ 'checked' if require_ema_dip else '' }}>
+        <input type="hidden" id="activeAutoAdjust" {{ 'checked' if auto_adjust else '' }}>
 
         <div class="card">
             <h3 style="margin-top: 0; margin-bottom: 16px;">Performance Summary</h3>
@@ -178,12 +179,14 @@
     <script>
         function fetchBreakoutAuditLogs() {
             const symbol = document.getElementById('activeTicker').value;
-            const requireEmaDip = document.getElementById('activeEmaDip').value === 'true';
-
+            // const requireEmaDip = document.getElementById('activeEmaDip').value === 'true';
+            // const autoAdjust = document.getElementById('activeAutoAdjust').value === 'true';
+            const requireEmaDip = document.getElementById('activeEmaDip').checked;
+            const autoAdjust = document.getElementById('activeAutoAdjust').checked;
             const tbody = document.getElementById('ath-table-body');
             if (!tbody || !symbol) return;
 
-            fetch(`/ath-analysis?symbol=${symbol}&require_ema_dip=${requireEmaDip}`)
+            fetch(`/ath-analysis?symbol=${symbol}&require_ema_dip=${requireEmaDip}&auto_adjust=${autoAdjust}`)
                 .then(res => res.json())
                 .then(data => {
                     tbody.innerHTML = ''; // Clear loading placeholder

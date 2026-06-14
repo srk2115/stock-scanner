@@ -227,6 +227,9 @@
         <label style="display: flex; align-items: center; cursor: pointer; margin: 0;">
             <input type="checkbox" id="requireEmaDipCheckbox" checked> Require 220 EMA Dip adjustment after historical ATH
         </label>
+        <label style="display: flex; align-items: center; cursor: pointer; margin: 0;">
+            <input type="checkbox" id="autoAdjustCheckbox" checked> Auto-Adjust for Splits and Dividends
+        </label>
     </div>
 
     <button id="scanBtn" onclick="runStockScan()">Execute Strategy Scan</button>
@@ -301,7 +304,8 @@
     function runStockScan() {
         const mode = document.querySelector('input[name="inputMode"]:checked').value;
         const requireEmaDip = document.getElementById('requireEmaDipCheckbox').checked;
-        
+        const autoAdjust = document.getElementById('autoAdjustCheckbox').checked;
+
         let payload = { 
             mode: mode,
             require_ema_dip: requireEmaDip 
@@ -394,9 +398,12 @@
         
         // Read the current state of the 220 EMA check box from your core scanner parameters panel!
         const requireEmaDip = document.getElementById('requireEmaDipCheckbox').checked;
+        console.log("Launching backtest with requireEmaDip =", requireEmaDip);
+        const autoAdjust = document.getElementById('autoAdjustCheckbox').checked;
+        console.log("Launching backtest with autoAdjust =", autoAdjust);
         
         // Pass both tracking keys into the dynamic routing engine link
-        window.location.href = `/backtest?symbol=${encodeURIComponent(symbolInput)}&require_ema_dip=${requireEmaDip}`;
+        window.location.href = `/backtest?symbol=${encodeURIComponent(symbolInput)}&require_ema_dip=${requireEmaDip}&auto_adjust=${autoAdjust}`;
     }
 </script>
 

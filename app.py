@@ -9,6 +9,8 @@ import yfinance as yf
 
 app = Flask(__name__)
 
+DATA_FOLDER_AUTO_ADJUST = "data-AdjClose_True"
+DATA_FOLDER_NO_ADJUST = "data"
 DATA_FOLDER = "data-AdjClose_True"
 # DATA_FOLDER = "data"
 
@@ -24,21 +26,27 @@ def clean_and_format_symbols(raw_input_string):
         formatted_symbols.append(token)
     return formatted_symbols
 
-def find_csv_file(symbol):
+def find_csv_file(symbol, auto_adjust):
     base_symbol = symbol.replace('.NS', '')
     possible_names = [
         f"{base_symbol}.csv", f"{base_symbol}.NS.csv",
         f"{symbol}.csv", f"{symbol}.NS.csv"
     ]
-    if not os.path.exists(DATA_FOLDER):
+
+    if(auto_adjust):
+        data_folder = DATA_FOLDER_AUTO_ADJUST
+    else:
+        data_folder = DATA_FOLDER_NO_ADJUST
+
+    if not os.path.exists(data_folder):
         return None
     for name in possible_names:
-        for actual_file in os.listdir(DATA_FOLDER):
+        for actual_file in os.listdir(data_folder):
             if actual_file.upper() == name.upper():
-                return os.path.join(DATA_FOLDER, actual_file)
+                return os.path.join(data_folder, actual_file)
     return None
 
-def process_single_stock(symbol, require_ema_dip):
+def process_single_stock(symbol, require_ema_dip, auto_adjust):
     """
     Worker function executed inside separate concurrent threads 
     to scan single stock metrics without locking the main thread.
@@ -52,7 +60,7 @@ def process_single_stock(symbol, require_ema_dip):
     val_ath = "-"
     status_str = "FAILED"
     
-    csv_path = find_csv_file(symbol)
+    csv_path = find_csv_file(symbol, auto_adjust)
     if not csv_path:
         status_str = "FILE NOT FOUND"
     else:
@@ -137,6 +145,7 @@ def scan_stocks():
     data = request.get_json() or {}
     input_mode = data.get('mode', 'index')
     require_ema_dip = data.get('require_ema_dip', True)
+    auto_adjust = data.get('auto_adjust', True)
     
     if input_mode == 'index':
         selected_index = data.get('index_name', '').upper()
@@ -153,7 +162,7 @@ def scan_stocks():
     results = []
     # Use max_workers=10 to rapidly speed up directory operations concurrently
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(process_single_stock, symbol, require_ema_dip) for symbol in symbols]
+        futures = [executor.submit(process_single_stock, symbol, require_ema_dip, auto_adjust) for symbol in symbols]
         for future in futures:
             results.append(future.result())
 
@@ -166,9 +175,15 @@ def web_backtest():
     # Read the checkbox/dropdown state from URL parameter (default to 'false' if missing)
     require_ema_dip_str = request.args.get('require_ema_dip', 'false').lower()
     require_ema_dip = (require_ema_dip_str == 'true')
+    print(f"Backtest request received for {target_symbol} with require_ema_dip={require_ema_dip}, require_ema_dip_str={require_ema_dip_str}, 220 EMA Dip checkbox state={require_ema_dip}")
     
-    csv_path = find_csv_file(target_symbol)
-    print(csv_path)    
+    # Read the auto_adjust state from URL parameter (default to 'true' if missing)
+    auto_adjust_str = request.args.get('auto_adjust', 'true').lower()
+    auto_adjust = (auto_adjust_str == 'true')
+    print(f"Backtest request received for {target_symbol} with auto_adjust={auto_adjust}, auto_adjust_str={auto_adjust_str}, auto_adjust checkbox state={auto_adjust}")
+
+    csv_path = find_csv_file(target_symbol, auto_adjust)
+    print(csv_path)
     if not csv_path:
         return f"""
         <body style="background-color: #1a202c; color: #edf2f7; font-family: sans-serif; padding: 30px;">
@@ -300,7 +315,7 @@ def web_backtest():
     # Simple selected string injectors for the dropdown on results view
     selected_true = "selected" if require_ema_dip else ""
     selected_false = "selected" if not require_ema_dip else ""
-    return render_template('backtest.html', symbol=target_symbol, require_ema_dip=require_ema_dip, total_trades=14, win_rate=64.2, net_return=114.8)    
+    return render_template('backtest.html', symbol=target_symbol, require_ema_dip=require_ema_dip, auto_adjust=auto_adjust, total_trades=14, win_rate=64.2, net_return=114.8)    
     
     # return f"""
     # <html>
@@ -341,8 +356,11 @@ def ath_analysis():
     """
     symbol = request.args.get('symbol', '').upper().strip()
     require_ema_dip = request.args.get('require_ema_dip', 'false').lower() == 'true'
+    auto_adjust = request.args.get('auto_adjust', 'true').lower() == 'true'
+    print(f"Received ATH analysis request for symbol: {symbol}, require_ema_dip={require_ema_dip}, auto_adjust={auto_adjust}")
+    data_folder = DATA_FOLDER_AUTO_ADJUST if auto_adjust else DATA_FOLDER_NO_ADJUST
     
-    file_path = os.path.join(DATA_FOLDER, f"{symbol}.csv")
+    file_path = os.path.join(data_folder, f"{symbol}.csv")
     print(f"Looking for data file at: {file_path}")
     if not os.path.exists(file_path):
         return jsonify({'error': f'Data file for symbol "{symbol}" not found.'}), 404
@@ -356,7 +374,7 @@ def ath_analysis():
         df['Date'] = pd.to_datetime(df['Date'])
         print(df.tail())
 
-        auto_adjust = True if DATA_FOLDER == "data-AdjClose_True" else False
+        # auto_adjust = True if data_folder == DATA_FOLDER_AUTO_ADJUST else False
         print(f"Fetching latest daily data for {symbol} with auto_adjust={auto_adjust}...")
         df1 = yf.download(
                 tickers=f"{symbol}.NS",
