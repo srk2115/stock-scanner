@@ -165,7 +165,7 @@ def web_backtest():
     require_ema_dip = (require_ema_dip_str == 'true')
     
     csv_path = find_csv_file(target_symbol)
-    
+    print(csv_path)    
     if not csv_path:
         return f"""
         <body style="background-color: #1a202c; color: #edf2f7; font-family: sans-serif; padding: 30px;">
@@ -188,7 +188,6 @@ def web_backtest():
         df['SMA_150'] = df['Close'].rolling(window=150).mean()
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         df['Low_52W'] = df['Low'].rolling(window=252).min()
-        
         historical_ath = []
         historical_ath_idx = []
         running_max_high, running_max_idx = -1.0, -1
@@ -339,7 +338,8 @@ def ath_analysis():
     symbol = request.args.get('symbol', '').upper().strip()
     require_ema_dip = request.args.get('require_ema_dip', 'false').lower() == 'true'
     
-    file_path = os.path.join('data', f"{symbol}.csv")
+    file_path = os.path.join(DATA_FOLDER, f"{symbol}.csv")
+    print(f"Looking for data file at: {file_path}")
     if not os.path.exists(file_path):
         return jsonify({'error': f'Data file for symbol "{symbol}" not found.'}), 404
 
@@ -423,6 +423,20 @@ def ath_analysis():
     except Exception as e:
         return jsonify({'error': f'Failed to process analysis: {str(e)}'}), 500
     
+# if __name__ == '__main__':
+#     # app.run(debug=True)
+#     app.run(debug=True, host='127.0.0.1', port=8000)
+
 if __name__ == '__main__':
-    app.run(debug=True)
-    # app.run(debug=True, host='127.0.0.1', port=8000)
+    # Render assigns a dynamic port via environment variables. 
+    # If it doesn't exist, fall back to your local port 8000.
+    port = int(os.environ.get("PORT", 8000))
+    
+    # On Render, host must be '0.0.0.0' to accept public web traffic.
+    # On local, we can bind to '127.0.0.1' or '0.0.0.0' seamlessly.
+    if os.environ.get("RENDER"):
+        # Render Environment Settings
+        app.run(debug=True, host='0.0.0.0', port=port)
+    else:
+        # Your Local Workspace Settings
+        app.run(debug=True, host='127.0.0.1', port=port)
