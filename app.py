@@ -9,7 +9,8 @@ import yfinance as yf
 
 app = Flask(__name__)
 
-DATA_FOLDER = "data-AdjClose_True"
+#DATA_FOLDER = "data-AdjClose_True"
+DATA_FOLDER = "data"
 
 def clean_and_format_symbols(raw_input_string):
     if not raw_input_string:
@@ -57,7 +58,8 @@ def process_single_stock(symbol, require_ema_dip):
     else:
         try:
             df = pd.read_csv(csv_path)
-            df.columns = [str(col).strip().capitalize() for col in df.columns]
+            # df.columns = [str(col).strip().capitalize() for col in df.columns]
+            df.columns = [str(col).strip() for col in df.columns]
             
             if 'Close' not in df.columns or 'High' not in df.columns or 'Low' not in df.columns:
                 status_str = "INVALID CSV FORMAT"
@@ -181,7 +183,8 @@ def web_backtest():
     
     try:
         df = pd.read_csv(csv_path)
-        df.columns = [str(col).strip().capitalize() for col in df.columns]
+        # df.columns = [str(col).strip().capitalize() for col in df.columns]
+        df.columns = [str(col).strip() for col in df.columns]
         df = df.dropna(subset=['Close']).reset_index(drop=True)
         df['Date'] = pd.to_datetime(df['Date'])
         
@@ -347,7 +350,8 @@ def ath_analysis():
     try:
         # Load and conform column headers
         df = pd.read_csv(file_path)
-        df.columns = [str(col).strip().capitalize() for col in df.columns]
+        # df.columns = [str(col).strip().capitalize() for col in df.columns]
+        df.columns = [str(col).strip() for col in df.columns]
         df = df.dropna(subset=['Close']).reset_index(drop=True)
         df['Date'] = pd.to_datetime(df['Date'])
         print(df.tail())
@@ -364,6 +368,7 @@ def ath_analysis():
                 progress=False
             )
         df1.columns = df1.columns.get_level_values(0)
+        # df1.columns = [str(col).strip().capitalize() for col in df.columns]
         df1.columns = [str(col).strip() for col in df1.columns]
         df['Date'] = pd.to_datetime(df['Date'])
         df1.reset_index(inplace=True)
