@@ -5,6 +5,7 @@ import pandas as pd
 from flask import Flask, render_template, request, jsonify
 from concurrent.futures import ThreadPoolExecutor
 from const import INDEX_SYMBOLS
+import yfinance as yf
 
 app = Flask(__name__)
 
@@ -349,12 +350,41 @@ def ath_analysis():
         df.columns = [str(col).strip().capitalize() for col in df.columns]
         df = df.dropna(subset=['Close']).reset_index(drop=True)
         df['Date'] = pd.to_datetime(df['Date'])
+        print(df.tail())
+
+        auto_adjust = True if DATA_FOLDER == "data-AdjClose_True" else False
+        print(f"Fetching latest daily data for {symbol} with auto_adjust={auto_adjust}...")
+        df1 = yf.download(
+                tickers=f"{symbol}.NS",
+                period="1d",
+                interval="1d",
+                auto_adjust=auto_adjust,  # Perfect High/Close ratios 
+                threads=False,     # Linear thread-safe tracking loops
+                timeout=15,
+                progress=False
+            )
+        df1.columns = df1.columns.get_level_values(0)
+        df1.columns = [str(col).strip() for col in df1.columns]
+        df['Date'] = pd.to_datetime(df['Date'])
+        df1.reset_index(inplace=True)
+        print(df1.tail())
+
+        print(f"Stacking historical data with latest daily data for {symbol}...")
+        cdf = pd.concat([df, df1], ignore_index=True)
+        cdf.tail()
+        print(f"Removing duplicate dates, keeping the latest entry for {symbol}...")
+        df = cdf.drop_duplicates(subset=['Date'], keep='last').reset_index(drop=True)
+        print(df.tail())
 
         # Calculate matching strategy indicators
         df['EMA_220'] = df['Close'].ewm(span=220, adjust=False).mean()
         df['SMA_150'] = df['Close'].rolling(window=150).mean()
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         df['Low_52W'] = df['Low'].rolling(window=252).min()
+
+
+        cdf = pd.concat([df, df1], ignore_index=True)
+        cdf.tail()
 
         ath_logs = []
         running_ath = 0.0
