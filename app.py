@@ -8,7 +8,7 @@ from const import INDEX_SYMBOLS
 
 app = Flask(__name__)
 
-DATA_FOLDER = "data"
+DATA_FOLDER = "data-AdjClose_True"
 
 def clean_and_format_symbols(raw_input_string):
     if not raw_input_string:
