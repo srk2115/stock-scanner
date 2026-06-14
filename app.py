@@ -9,8 +9,8 @@ import yfinance as yf
 
 app = Flask(__name__)
 
-#DATA_FOLDER = "data-AdjClose_True"
-DATA_FOLDER = "data"
+DATA_FOLDER = "data-AdjClose_True"
+# DATA_FOLDER = "data"
 
 def clean_and_format_symbols(raw_input_string):
     if not raw_input_string:
