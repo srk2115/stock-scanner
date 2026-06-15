@@ -306,9 +306,11 @@
         const requireEmaDip = document.getElementById('requireEmaDipCheckbox').checked;
         const autoAdjust = document.getElementById('autoAdjustCheckbox').checked;
 
+        console.log("Running stock scan with mode:", mode, "Require EMA Dip:", requireEmaDip, "Auto Adjust:", autoAdjust);
         let payload = { 
             mode: mode,
-            require_ema_dip: requireEmaDip 
+            require_ema_dip: requireEmaDip,
+            auto_adjust: autoAdjust
         };
 
         if (mode === 'manual') {

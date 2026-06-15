@@ -6,6 +6,7 @@ from flask import Flask, render_template, request, jsonify
 from concurrent.futures import ThreadPoolExecutor
 from const import INDEX_SYMBOLS
 import yfinance as yf
+import numpy as np
 
 app = Flask(__name__)
 
@@ -73,7 +74,32 @@ def process_single_stock(symbol, require_ema_dip, auto_adjust):
                 status_str = "INVALID CSV FORMAT"
             else:
                 df = df.dropna(subset=['Close']).reset_index(drop=True)
-                
+                df['Date'] = pd.to_datetime(df['Date'])
+
+                print(f"Fetching latest daily data for {symbol} with auto_adjust={auto_adjust}...")
+                df1 = yf.download(
+                        tickers=f"{symbol}.NS",
+                        period="1d",
+                        interval="1d",
+                        auto_adjust=auto_adjust,  # Perfect High/Close ratios 
+                        threads=False,     # Linear thread-safe tracking loops
+                        timeout=15,
+                        progress=False
+                    )
+                df1.columns = df1.columns.get_level_values(0)
+                # df1.columns = [str(col).strip().capitalize() for col in df.columns]
+                df1.columns = [str(col).strip() for col in df1.columns]
+                df['Date'] = pd.to_datetime(df['Date'])
+                df1.reset_index(inplace=True)
+                print(df1.tail())
+
+                print(f"Stacking historical data with latest daily data for {symbol}...")
+                cdf = pd.concat([df, df1], ignore_index=True)
+                cdf.tail()
+                print(f"Removing duplicate dates, keeping the latest entry for {symbol}...")
+                df = cdf.drop_duplicates(subset=['Date'], keep='last').reset_index(drop=True)
+                print(df.tail())
+
                 if len(df) < 252:
                     status_str = "INSUFFICIENT DATA"
                 else:
@@ -145,8 +171,13 @@ def scan_stocks():
     data = request.get_json() or {}
     input_mode = data.get('mode', 'index')
     require_ema_dip = data.get('require_ema_dip', True)
+    print(f"Backtest request received for with require_ema_dip={require_ema_dip}, 220 EMA Dip checkbox state={require_ema_dip}")
+
     auto_adjust = data.get('auto_adjust', True)
-    
+    print(f"Backtest request received for with auto_adjust={auto_adjust}, auto_adjust checkbox state={auto_adjust}")
+
+
+    print(f"Scanning stocks with parameters: require_ema_dip={require_ema_dip}, auto_adjust={auto_adjust}")
     if input_mode == 'index':
         selected_index = data.get('index_name', '').upper()
         symbols = INDEX_SYMBOLS.get(selected_index, [])
@@ -168,6 +199,73 @@ def scan_stocks():
 
     return jsonify({'success': True, 'results': results})
 
+def run_strategy_backtest(df, require_ema_dip=False):
+    """
+    Core strategy evaluation logic. Tracks actual closed positions 
+    to calculate live summary performance metrics.
+    """
+    trades = []
+    in_position = False
+    entry_price = 0.0
+    
+    running_ath = 0.0
+    ath_idx = -1
+    
+    # Evaluate data rows starting from lookback threshold
+    for i in range(252, len(df)):
+        row = df.iloc[i]
+        
+        # Track running historical ATH barrier state manually for strategy matching
+        # inside the loop to avoid forward-looking bias
+        past_window = df.iloc[252:i]
+        if not past_window.empty:
+            running_ath = past_window['High'].max()
+            # Find the row index where that specific max High occurred
+            ath_idx = past_window['High'].idxmax()
+        else:
+            running_ath = 0.0
+            ath_idx = -1
+
+        if not in_position:
+            # Check entry criteria matches
+            cond1 = row['SMA_150'] > row['EMA_220']
+            cond2 = row['Close'] > row['SMA_50']
+            cond3 = row['SMA_50'] > row['SMA_150']
+            cond4 = row['Close'] > (1.25 * row['Low_52W'])
+            cond5 = row['Close'] > running_ath
+            
+            cond6 = True
+            if require_ema_dip and ath_idx != -1:
+                if ath_idx + 1 <= i - 1:
+                    interim_segment = df.iloc[ath_idx + 1 : i]
+                    cond6 = (interim_segment['Close'] < interim_segment['EMA_220']).any()
+                else:
+                    cond6 = False
+            
+            if cond1 and cond2 and cond3 and cond4 and cond5 and cond6:
+                in_position = True
+                entry_price = row['Close']
+        else:
+            # Simple Exit Rule: Close crosses below SMA 50 or final day of dataset
+            if row['Close'] < row['SMA_50'] or i == len(df) - 1:
+                in_position = False
+                pnl = (row['Close'] - entry_price) / entry_price
+                trades.append(pnl)
+                
+    # Compute performance statistics arrays dynamically
+    total_trades = len(trades)
+    if total_trades > 0:
+        winning_trades = sum(1 for pnl in trades if pnl > 0)
+        win_rate = round((winning_trades / total_trades) * 100, 1)
+        
+        # Calculate compounded system returns
+        compounded_return = round((np.prod([1 + pnl for pnl in trades]) - 1) * 100, 1)
+    else:
+        win_rate = 0.0
+        compounded_return = 0.0
+        
+    return total_trades, win_rate, compounded_return
+
 @app.route('/backtest', methods=['GET'])
 def web_backtest():
     target_symbol = request.args.get('symbol', 'MAHABANK').strip().upper()
@@ -182,6 +280,7 @@ def web_backtest():
     auto_adjust = (auto_adjust_str == 'true')
     print(f"Backtest request received for {target_symbol} with auto_adjust={auto_adjust}, auto_adjust_str={auto_adjust_str}, auto_adjust checkbox state={auto_adjust}")
 
+
     csv_path = find_csv_file(target_symbol, auto_adjust)
     print(csv_path)
     if not csv_path:
@@ -192,130 +291,178 @@ def web_backtest():
             <br><a href="/" style="color: #63b3ed; text-decoration: none;">&larr; Return to Core Scanner</a>
         </body>
         """, 404
-        
-    old_stdout = sys.stdout
-    sys.stdout = buffer = io.StringIO()
-    
+
+    # Safe default fallbacks if data is missing
+    total_trades, win_rate, net_return = 0, 0.0, 0.0
+
     try:
         df = pd.read_csv(csv_path)
         # df.columns = [str(col).strip().capitalize() for col in df.columns]
         df.columns = [str(col).strip() for col in df.columns]
         df = df.dropna(subset=['Close']).reset_index(drop=True)
         df['Date'] = pd.to_datetime(df['Date'])
-        
+
+        print(df.tail())
+
+        # auto_adjust = True if data_folder == DATA_FOLDER_AUTO_ADJUST else False
+        print(f"Fetching latest daily data for {target_symbol} with auto_adjust={auto_adjust}...")
+        df1 = yf.download(
+                tickers=f"{target_symbol}.NS",
+                period="1d",
+                interval="1d",
+                auto_adjust=auto_adjust,  # Perfect High/Close ratios 
+                threads=False,     # Linear thread-safe tracking loops
+                timeout=15,
+                progress=False
+            )
+        df1.columns = df1.columns.get_level_values(0)
+        # df1.columns = [str(col).strip().capitalize() for col in df.columns]
+        df1.columns = [str(col).strip() for col in df1.columns]
+        df['Date'] = pd.to_datetime(df['Date'])
+        df1.reset_index(inplace=True)
+        print(df1.tail())
+
+        print(f"Stacking historical data with latest daily data for {target_symbol}...")
+        cdf = pd.concat([df, df1], ignore_index=True)
+        cdf.tail()
+        print(f"Removing duplicate dates, keeping the latest entry for {target_symbol}...")
+        df = cdf.drop_duplicates(subset=['Date'], keep='last').reset_index(drop=True)
+        print(df.tail())
+
         df['EMA_220'] = df['Close'].ewm(span=220, adjust=False).mean()
         df['SMA_150'] = df['Close'].rolling(window=150).mean()
         df['SMA_50'] = df['Close'].rolling(window=50).mean()
         df['Low_52W'] = df['Low'].rolling(window=252).min()
-        historical_ath = []
-        historical_ath_idx = []
-        running_max_high, running_max_idx = -1.0, -1
-        
-        for idx in range(len(df)):
-            historical_ath.append(running_max_high)
-            historical_ath_idx.append(running_max_idx)
-            if df['High'].iloc[idx] > running_max_high:
-                running_max_high = float(df['High'].iloc[idx])
-                running_max_idx = idx
-                
-        df['Hist_ATH'] = historical_ath
-        df['Hist_ATH_Idx'] = historical_ath_idx
-        
-        trades = []
-        in_position = False
-        entry_price, entry_date = 0.0, None
-        
-        for i in range(252, len(df)):
-            close = float(df['Close'].iloc[i])
-            low = float(df['Low'].iloc[i])
-            sma50 = float(df['SMA_50'].iloc[i])
-            sma150 = float(df['SMA_150'].iloc[i])
-            ema220 = float(df['EMA_220'].iloc[i])
-            low52w = float(df['Low_52W'].iloc[i])
-            hist_ath = float(df['Hist_ATH'].iloc[i])
-            ath_idx = int(df['Hist_ATH_Idx'].iloc[i])
-            
-            if not in_position:
-                # Core Matrix Conditions
-                cond1 = sma150 > ema220
-                cond2 = close > sma50
-                cond3 = sma50 > sma150
-                cond4 = close > (1.25 * low52w)
-                cond5 = close > hist_ath
-                
-                # Dynamic Filter Validation Check
-                cond6 = True
-                if require_ema_dip and ath_idx != -1:
-                    if ath_idx + 1 <= i - 1:
-                        interim_df = df.iloc[ath_idx + 1 : i]
-                        cond6 = (interim_df['Close'] < interim_df['EMA_220']).any()
-                    else:
-                        cond6 = False
-                        
-                if cond1 and cond2 and cond3 and cond4 and cond5 and cond6:
-                    in_position = True
-                    entry_price = close
-                    entry_date = df['Date'].iloc[i]
-            else:
-                exit_cond_ema = close < ema220
-                stop_loss_level = entry_price * 0.85
-                exit_cond_stop = low <= stop_loss_level
-                is_last_row = (i == len(df) - 1)
-                
-                if exit_cond_ema or exit_cond_stop or is_last_row:
-                    in_position = False
-                    if exit_cond_stop and not exit_cond_ema and not is_last_row:
-                        exit_price = stop_loss_level
-                        exit_reason = "15% Stop Loss Hit"
-                    elif exit_cond_ema and not exit_cond_stop:
-                        exit_price = close
-                        exit_reason = "Closed Below 220 EMA"
-                    elif exit_cond_ema and exit_cond_stop:
-                        exit_price = stop_loss_level
-                        exit_reason = "15% Stop Loss Hit (Same Day)"
-                    else:
-                        exit_price = close
-                        exit_reason = "End of Data (Position Active)"
-                        
-                    pnl_pct = ((exit_price - entry_price) / entry_price) * 100
-                    trades.append({
-                        'Entry Date': entry_date.strftime('%Y-%m-%d'),
-                        'Entry Price': round(entry_price, 2),
-                        'Exit Date': df['Date'].iloc[i].strftime('%Y-%m-%d'),
-                        'Exit Price': round(exit_price, 2),
-                        'PnL %': round(pnl_pct, 2),
-                        'Exit Reason': exit_reason
-                    })
-                    
-        trades_df = pd.DataFrame(trades)
-        print("=" * 95)
-        print(f"STRATEGY BACKTEST HISTORICAL REPORT FOR TRADING SYMBOL: {target_symbol}")
-        print(f"EMA 220 Dip Correction Constraint Applied: {require_ema_dip}")
-        print("=" * 95)
-        if trades_df.empty:
-            print("No trend trade executions were logged under these rules parameters.")
-        else:
-            print(trades_df.to_string(index=False))
-            wins = (trades_df['PnL %'] > 0).sum()
-            total = len(trades_df)
-            print("-" * 95)
-            print(f"Total Completed Trades : {total}")
-            print(f"Strategy Win Rate      : {(wins / total) * 100:.2f}%")
-            print(f"Average Return / Trade : {trades_df['PnL %'].mean():.2f}%")
-            print(f"Compounded Net Return  : {(((trades_df['PnL %'] / 100 + 1).prod() - 1) * 100):.2f}%")
-        print("=" * 95)
-        
+
+        total_trades, win_rate, net_return = run_strategy_backtest(df, require_ema_dip)
+        print(f"Backtest completed for {target_symbol}: Total Trades={total_trades}, Win Rate={win_rate}%, Compounded Return={net_return}%")
     except Exception as e:
         print(f"An error occurred while generating the backtest report: {str(e)}")
-    finally:
-        sys.stdout = old_stdout
+
+    # old_stdout = sys.stdout
+    # sys.stdout = buffer = io.StringIO()
+
+    # try:
+    #     df = pd.read_csv(csv_path)
+    #     # df.columns = [str(col).strip().capitalize() for col in df.columns]
+    #     df.columns = [str(col).strip() for col in df.columns]
+    #     df = df.dropna(subset=['Close']).reset_index(drop=True)
+    #     df['Date'] = pd.to_datetime(df['Date'])
         
-    output_text = buffer.getvalue()
+    #     df['EMA_220'] = df['Close'].ewm(span=220, adjust=False).mean()
+    #     df['SMA_150'] = df['Close'].rolling(window=150).mean()
+    #     df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    #     df['Low_52W'] = df['Low'].rolling(window=252).min()
+    #     historical_ath = []
+    #     historical_ath_idx = []
+    #     running_max_high, running_max_idx = -1.0, -1
+        
+    #     for idx in range(len(df)):
+    #         historical_ath.append(running_max_high)
+    #         historical_ath_idx.append(running_max_idx)
+    #         if df['High'].iloc[idx] > running_max_high:
+    #             running_max_high = float(df['High'].iloc[idx])
+    #             running_max_idx = idx
+                
+    #     df['Hist_ATH'] = historical_ath
+    #     df['Hist_ATH_Idx'] = historical_ath_idx
+        
+    #     trades = []
+    #     in_position = False
+    #     entry_price, entry_date = 0.0, None
+        
+    #     for i in range(252, len(df)):
+    #         close = float(df['Close'].iloc[i])
+    #         low = float(df['Low'].iloc[i])
+    #         sma50 = float(df['SMA_50'].iloc[i])
+    #         sma150 = float(df['SMA_150'].iloc[i])
+    #         ema220 = float(df['EMA_220'].iloc[i])
+    #         low52w = float(df['Low_52W'].iloc[i])
+    #         hist_ath = float(df['Hist_ATH'].iloc[i])
+    #         ath_idx = int(df['Hist_ATH_Idx'].iloc[i])
+            
+    #         if not in_position:
+    #             # Core Matrix Conditions
+    #             cond1 = sma150 > ema220
+    #             cond2 = close > sma50
+    #             cond3 = sma50 > sma150
+    #             cond4 = close > (1.25 * low52w)
+    #             cond5 = close > hist_ath
+                
+    #             # Dynamic Filter Validation Check
+    #             cond6 = True
+    #             if require_ema_dip and ath_idx != -1:
+    #                 if ath_idx + 1 <= i - 1:
+    #                     interim_df = df.iloc[ath_idx + 1 : i]
+    #                     cond6 = (interim_df['Close'] < interim_df['EMA_220']).any()
+    #                 else:
+    #                     cond6 = False
+                        
+    #             if cond1 and cond2 and cond3 and cond4 and cond5 and cond6:
+    #                 in_position = True
+    #                 entry_price = close
+    #                 entry_date = df['Date'].iloc[i]
+    #         else:
+    #             exit_cond_ema = close < ema220
+    #             stop_loss_level = entry_price * 0.85
+    #             exit_cond_stop = low <= stop_loss_level
+    #             is_last_row = (i == len(df) - 1)
+                
+    #             if exit_cond_ema or exit_cond_stop or is_last_row:
+    #                 in_position = False
+    #                 if exit_cond_stop and not exit_cond_ema and not is_last_row:
+    #                     exit_price = stop_loss_level
+    #                     exit_reason = "15% Stop Loss Hit"
+    #                 elif exit_cond_ema and not exit_cond_stop:
+    #                     exit_price = close
+    #                     exit_reason = "Closed Below 220 EMA"
+    #                 elif exit_cond_ema and exit_cond_stop:
+    #                     exit_price = stop_loss_level
+    #                     exit_reason = "15% Stop Loss Hit (Same Day)"
+    #                 else:
+    #                     exit_price = close
+    #                     exit_reason = "End of Data (Position Active)"
+                        
+    #                 pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+    #                 trades.append({
+    #                     'Entry Date': entry_date.strftime('%Y-%m-%d'),
+    #                     'Entry Price': round(entry_price, 2),
+    #                     'Exit Date': df['Date'].iloc[i].strftime('%Y-%m-%d'),
+    #                     'Exit Price': round(exit_price, 2),
+    #                     'PnL %': round(pnl_pct, 2),
+    #                     'Exit Reason': exit_reason
+    #                 })
+                    
+    #     trades_df = pd.DataFrame(trades)
+    #     print("=" * 95)
+    #     print(f"STRATEGY BACKTEST HISTORICAL REPORT FOR TRADING SYMBOL: {target_symbol}")
+    #     print(f"EMA 220 Dip Correction Constraint Applied: {require_ema_dip}")
+    #     print("=" * 95)
+    #     if trades_df.empty:
+    #         print("No trend trade executions were logged under these rules parameters.")
+    #     else:
+    #         print(trades_df.to_string(index=False))
+    #         wins = (trades_df['PnL %'] > 0).sum()
+    #         total = len(trades_df)
+    #         print("-" * 95)
+    #         print(f"Total Completed Trades : {total}")
+    #         print(f"Strategy Win Rate      : {(wins / total) * 100:.2f}%")
+    #         print(f"Average Return / Trade : {trades_df['PnL %'].mean():.2f}%")
+    #         print(f"Compounded Net Return  : {(((trades_df['PnL %'] / 100 + 1).prod() - 1) * 100):.2f}%")
+    #     print("=" * 95)
+        
+    # except Exception as e:
+    #     print(f"An error occurred while generating the backtest report: {str(e)}")
+    # finally:
+    #     sys.stdout = old_stdout
+        
+    # output_text = buffer.getvalue()
+
     
     # Simple selected string injectors for the dropdown on results view
     selected_true = "selected" if require_ema_dip else ""
     selected_false = "selected" if not require_ema_dip else ""
-    return render_template('backtest.html', symbol=target_symbol, require_ema_dip=require_ema_dip, auto_adjust=auto_adjust, total_trades=14, win_rate=64.2, net_return=114.8)    
+    return render_template('backtest.html', symbol=target_symbol, require_ema_dip=require_ema_dip, auto_adjust=auto_adjust, total_trades=total_trades, win_rate=win_rate, net_return=net_return)    
     
     # return f"""
     # <html>
@@ -476,10 +623,6 @@ def ath_analysis():
     except Exception as e:
         return jsonify({'error': f'Failed to process analysis: {str(e)}'}), 500
     
-# if __name__ == '__main__':
-#     # app.run(debug=True)
-#     app.run(debug=True, host='127.0.0.1', port=8000)
-
 if __name__ == '__main__':
     # Render assigns a dynamic port via environment variables. 
     # If it doesn't exist, fall back to your local port 8000.
