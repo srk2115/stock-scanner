@@ -127,9 +127,9 @@
         <!-- <input type="hidden" id="activeTicker" value="{{ symbol }}">
         <input type="hidden" id="activeEmaDip" {{ 'checked' if require_ema_dip else '' }}>
         <input type="hidden" id="activeAutoAdjust" {{ 'checked' if auto_adjust else '' }}> -->
-        <input type="text" id="activeTicker" value="{{ symbol }}">
-        <input type="text" id="activeEmaDip" value="{{ 'true' if require_ema_dip else 'false' }}">
-        <input type="text" id="activeAutoAdjust" value="{{ 'true' if auto_adjust else 'false' }}">
+        <input type="hidden" id="activeTicker" value="{{ symbol }}">
+        <input type="hidden" id="activeEmaDip" value="{{ 'true' if require_ema_dip else 'false' }}">
+        <input type="hidden" id="activeAutoAdjust" value="{{ 'true' if auto_adjust else 'false' }}">
 
 
         <div class="card">

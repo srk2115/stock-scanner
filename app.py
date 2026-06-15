@@ -73,6 +73,33 @@ def process_single_stock(symbol, require_ema_dip, auto_adjust):
             if 'Close' not in df.columns or 'High' not in df.columns or 'Low' not in df.columns:
                 status_str = "INVALID CSV FORMAT"
             else:
+                # df = df.dropna(subset=['Close']).reset_index(drop=True)
+                # df['Date'] = pd.to_datetime(df['Date'])
+
+                # print(f"Fetching latest daily data for {symbol} with auto_adjust={auto_adjust}...")
+                # df1 = yf.download(
+                #         tickers=f"{symbol}.NS",
+                #         period="1d",
+                #         interval="1d",
+                #         auto_adjust=auto_adjust,  # Perfect High/Close ratios 
+                #         threads=False,     # Linear thread-safe tracking loops
+                #         timeout=15,
+                #         progress=False
+                #     )
+                # df1.columns = df1.columns.get_level_values(0)
+                # # df1.columns = [str(col).strip().capitalize() for col in df.columns]
+                # df1.columns = [str(col).strip() for col in df1.columns]
+                # df['Date'] = pd.to_datetime(df['Date'])
+                # df1.reset_index(inplace=True)
+                # print(df1.tail())
+
+                # print(f"Stacking historical data with latest daily data for {symbol}...")
+                # cdf = pd.concat([df, df1], ignore_index=True)
+                # cdf.tail()
+                # print(f"Removing duplicate dates, keeping the latest entry for {symbol}...")
+                # df = cdf.drop_duplicates(subset=['Date'], keep='last').reset_index(drop=True)
+                # print(df.tail())
+
                 df = df.dropna(subset=['Close']).reset_index(drop=True)
                 df['Date'] = pd.to_datetime(df['Date'])
 
@@ -81,21 +108,38 @@ def process_single_stock(symbol, require_ema_dip, auto_adjust):
                         tickers=f"{symbol}.NS",
                         period="1d",
                         interval="1d",
-                        auto_adjust=auto_adjust,  # Perfect High/Close ratios 
-                        threads=False,     # Linear thread-safe tracking loops
+                        auto_adjust=auto_adjust, 
+                        threads=False,     
                         timeout=15,
                         progress=False
                     )
-                df1.columns = df1.columns.get_level_values(0)
-                # df1.columns = [str(col).strip().capitalize() for col in df.columns]
-                df1.columns = [str(col).strip() for col in df1.columns]
-                df['Date'] = pd.to_datetime(df['Date'])
+
+                # --- CRITICAL FIX START: Handle MultiIndex Columns Safely ---
+                if isinstance(df1.columns, pd.MultiIndex):
+                    # If a batch multi-index leaks through, extract ONLY the current symbol's data slice
+                    ticker_str = f"{symbol}.NS"
+                    if ticker_str in df1.columns.get_level_values(1):
+                        df1 = df1.xs(ticker_str, axis=1, level=1)
+                    else:
+                        # Fallback to level 0 if layout varies
+                        df1.columns = df1.columns.get_level_values(0)
+                else:
+                    # If it's already flat, just normalize index layout
+                    df1.columns = [str(col).strip() for col in df1.columns]
+
+                # Ensure we have uniquely named columns before moving forward
+                df1 = df1.loc[:, ~df1.columns.duplicated()]
+                # --- CRITICAL FIX END ---
+
                 df1.reset_index(inplace=True)
-                print(df1.tail())
+
+                # Double check Date normalization mapping rules match
+                if 'Date' in df1.columns:
+                    df1['Date'] = pd.to_datetime(df1['Date'])
 
                 print(f"Stacking historical data with latest daily data for {symbol}...")
                 cdf = pd.concat([df, df1], ignore_index=True)
-                cdf.tail()
+
                 print(f"Removing duplicate dates, keeping the latest entry for {symbol}...")
                 df = cdf.drop_duplicates(subset=['Date'], keep='last').reset_index(drop=True)
                 print(df.tail())
